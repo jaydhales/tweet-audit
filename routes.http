@@ -1,0 +1,11 @@
+GET http://localhost:3000/
+
+### Health Check
+GET http://localhost:3000/health
+
+### Test AI
+GET http://localhost:3000/test-ai
+
+### Run Audit
+POST http://localhost:3000/audit
+

@@ -1,0 +1,18 @@
+[package]
+name = "tweet-audit"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = "0.8.9"
+tokio = {
+    version = "1.52.1",
+    features = ["full"]
+}
+serde = { version = "1.0.228", features = ["derive"] }
+serde_yaml = "0.9.34+deprecated"
+csv = "1.4.0"
+genai = "0.5.3"
+serde_json = "1.0.149"
+base64 = "0.22.1"
+reqwest = "0.13.3"

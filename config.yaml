@@ -1,0 +1,2 @@
+archive_path: "data/tweet/tweets.json"
+output_csv: "flagged_tweet.csv"
