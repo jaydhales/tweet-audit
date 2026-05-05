@@ -1,6 +1,7 @@
 use base64::{Engine as _, engine::general_purpose};
 use std::fs;
 use std::path::PathBuf;
+use crate::tweets::{load_tweets, TweetArchive};
 
 #[derive(serde::Deserialize)]
 struct RawConfig {
@@ -9,7 +10,7 @@ struct RawConfig {
 }
 
 pub struct Config {
-    pub archive: String,
+    pub archive: TweetArchive,
     pub output: Vec<FlaggedTweet>,
 }
 
@@ -24,20 +25,20 @@ pub fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
     let config: RawConfig = serde_yaml::from_str(&contents)?;
 
     println!("File:  {:?}", &config.archive_path);
-
-    let archive_raw = fs::read(&config.archive_path)?;
-    println!("File Size: {}kb", archive_raw.len() / 1024);
-
-    let archive = general_purpose::STANDARD.encode(&archive_raw);
+    
+    let archive = load_tweets(config.archive_path)?;
 
     if archive.is_empty() {
-        return Err("Invalid Zip File".into());
+        return Err("Invalid Json File".into());
     }
+    println!("✅ Successfully loaded {} tweets!", archive.len());
 
+    println!("Reading existing flagged tweets from: {:?}", &config.output_csv);
     let output: Vec<FlaggedTweet> = csv::Reader::from_path(&config.output_csv)?
         .deserialize()
         .map(|f| f.unwrap())
         .collect();
+    println!("✅ Successfully loaded {} flagged tweets!", output.len());
 
     Ok(Config { archive, output })
 }

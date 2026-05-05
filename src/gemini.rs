@@ -1,7 +1,7 @@
-use genai::resolver::{AuthData, AuthResolver};
-use genai::{Client as GenAIClient, ModelIden};
 use reqwest::header::HeaderMap;
 use serde::Serialize;
+use std::time::Duration;
+use tokio::time::sleep;
 
 pub const GEMINI_MODEL: &str = "gemini-2.5-flash";
 const GEMINI_ENV_KEY: &str = "GEMINI_API_KEY";
@@ -57,6 +57,18 @@ pub struct TokenDetail {
     pub modality: Option<String>,
     #[serde(rename = "tokenCount")]
     pub token_count: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GeminiErrorResponse {
+    pub error: GeminiError,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GeminiError {
+    pub code: u32,
+    pub message: String,
+    pub status: String,
 }
 
 impl ChatResponse {
@@ -133,6 +145,8 @@ impl GeminiClient {
             panic!("env var not set: {}", GEMINI_ENV_KEY);
         }
 
+        println!("🔑 Gemini API Key found in env: {}", GEMINI_ENV_KEY);
+        println!("🚀 Gemini Client initialized with model: {}", GEMINI_MODEL);
         GeminiClient {
             client: reqwest::Client::new(),
             base_url: format!(
@@ -146,28 +160,84 @@ impl GeminiClient {
         &self,
         request: ChatRequest,
     ) -> Result<String, Box<dyn std::error::Error>> {
+        self.exec_chat_with_retry(request, 3).await
+    }
+
+    pub async fn exec_chat_with_retry(
+        &self,
+        request: ChatRequest,
+        max_retries: u32,
+    ) -> Result<String, Box<dyn std::error::Error>> {
         let mut headers = HeaderMap::new();
         headers.insert("x-goog-api-key", std::env::var(GEMINI_ENV_KEY)?.parse()?);
-        let raw_res = self
-            .client
-            .post(&self.base_url)
-            .headers(headers)
-            .json(&request)
-            .send()
-            .await?
-            .text()
-            .await?;
 
-        println!("Server Response: \n{}", raw_res);
+        let mut attempt = 0;
+        let mut wait_time = Duration::from_secs(2);
 
-        let res = serde_json::from_str::<ChatResponse>(&raw_res)?;
+        loop {
+            attempt += 1;
 
-        // let stripped_res = res.first_text_stripped().unwrap();
+            println!("Chat Request (Attempt {}/{}):\n{:?}",
+                attempt, max_retries,
+                serde_json::to_string(&request)?);
 
-        if let Some(stripped) = res.first_text_stripped() {
-            Ok(stripped)
-        } else {
-            Err("Response Extraction failed".into())
+            let response = self
+                .client
+                .post(&self.base_url)
+                .headers(headers.clone())
+                .json(&request)
+                .send()
+                .await?;
+
+            let status = response.status();
+            let raw_res = response.text().await?;
+
+            println!("Server Response (Status {}):\n{}", status, raw_res);
+
+            // Check for rate limit error (429)
+            if status.as_u16() == 429 {
+                if attempt >= max_retries {
+                    return Err(format!("Max retries ({}) exceeded. Last error: {}", max_retries, raw_res).into());
+                }
+
+                // Try to parse error response to get retry delay
+                if let Ok(err_resp) = serde_json::from_str::<GeminiErrorResponse>(&raw_res) {
+                    println!("⚠️  Rate limit hit: {}", err_resp.error.message);
+
+                    // Parse retry delay from error message if present
+                    // Message format: "Please retry in 59.402129186s."
+                    if let Some(delay_str) = err_resp.error.message
+                        .split("Please retry in ")
+                        .nth(1)
+                        .and_then(|s| s.split("s.").next())
+                    {
+                        if let Ok(delay_secs) = delay_str.parse::<f64>() {
+                            wait_time = Duration::from_secs_f64(delay_secs.ceil() + 1.0);
+                        }
+                    }
+                }
+
+                println!("⏳ Waiting {:?} before retry...", wait_time);
+                sleep(wait_time).await;
+
+                // Exponential backoff for next attempt
+                wait_time = wait_time.mul_f32(2.0);
+                continue;
+            }
+
+            // Check for other HTTP errors
+            if !status.is_success() {
+                return Err(format!("HTTP error {}: {}", status, raw_res).into());
+            }
+
+            // Parse successful response
+            let res = serde_json::from_str::<ChatResponse>(&raw_res)?;
+
+            return if let Some(stripped) = res.first_text_stripped() {
+                Ok(stripped)
+            } else {
+                Err("Response extraction failed".into())
+            }
         }
     }
 }

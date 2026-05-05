@@ -2,6 +2,7 @@ mod config;
 mod gemini;
 mod routes;
 mod state;
+mod tweets;
 
 use crate::config::load_config;
 use crate::gemini::{
@@ -36,7 +37,9 @@ async fn main() {
 
     // run our app with hyper, listening globally on port 3000
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    println!("🚀 Server running on port 3000");
     axum::serve(listener, app).await.unwrap();
+
 }
 
 #[derive(Deserialize, Serialize)]
