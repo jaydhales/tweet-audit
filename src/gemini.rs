@@ -172,14 +172,13 @@ impl GeminiClient {
         headers.insert("x-goog-api-key", std::env::var(GEMINI_ENV_KEY)?.parse()?);
 
         let mut attempt = 0;
-        let mut wait_time = Duration::from_secs(2);
+        let mut wait_time = Duration::from_secs(4);
 
         loop {
             attempt += 1;
 
-            println!("Chat Request (Attempt {}/{}):\n{:?}",
-                attempt, max_retries,
-                serde_json::to_string(&request)?);
+            println!("Chat Request (Attempt {}/{}):",
+                attempt, max_retries);
 
             let response = self
                 .client
@@ -194,15 +193,16 @@ impl GeminiClient {
 
             println!("Server Response (Status {}):\n{}", status, raw_res);
 
-            // Check for rate limit error (429)
-            if status.as_u16() == 429 {
+
+            // Check for Error
+            if status.as_u16() / 100 >= 4 { // 400 - 504
                 if attempt >= max_retries {
                     return Err(format!("Max retries ({}) exceeded. Last error: {}", max_retries, raw_res).into());
                 }
 
                 // Try to parse error response to get retry delay
                 if let Ok(err_resp) = serde_json::from_str::<GeminiErrorResponse>(&raw_res) {
-                    println!("⚠️  Rate limit hit: {}", err_resp.error.message);
+                    println!("⚠️ Gemini Server Error: {}", err_resp.error.message);
 
                     // Parse retry delay from error message if present
                     // Message format: "Please retry in 59.402129186s."
@@ -234,6 +234,7 @@ impl GeminiClient {
             let res = serde_json::from_str::<ChatResponse>(&raw_res)?;
 
             return if let Some(stripped) = res.first_text_stripped() {
+                println!("Stripped Response: {}", stripped);
                 Ok(stripped)
             } else {
                 Err("Response extraction failed".into())

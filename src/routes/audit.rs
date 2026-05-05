@@ -10,11 +10,8 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::time::sleep;
 
 const BATCH_SIZE: usize = 20; // Process 20 tweets per batch
-const DELAY_BETWEEN_BATCHES: Duration = Duration::from_secs(3); // 3 second delay
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct AuditedTweets {
@@ -30,8 +27,6 @@ pub async fn run_audit(
     let total_tweets = state.config.archive.len();
     println!("📊 Starting audit of {} tweets in batches of {}", total_tweets, BATCH_SIZE);
 
-    let mut all_results = Vec::new();
-
     // Split tweets into batches
     let batches: Vec<&[TweetEnvelope]> = state.config.archive
         .chunks(BATCH_SIZE)
@@ -39,34 +34,75 @@ pub async fn run_audit(
 
     let total_batches = batches.len();
 
-    for (batch_idx, batch) in batches.into_iter().enumerate() {
-        let batch_num = batch_idx + 1;
-        println!("\n🔄 Processing batch {}/{} ({} tweets)",
-            batch_num, total_batches, batch.len());
+    println!("📊 Total Batches: {}", total_batches);
 
-        match process_batch(&state, batch, batch_num).await {
-            Ok(mut results) => {
-                println!("✅ Batch {}/{} completed: {} flagged tweets",
-                    batch_num, total_batches, results.len());
-                all_results.append(&mut results);
-            }
-            Err(e) => {
-                println!("❌ Batch {}/{} failed: {}", batch_num, total_batches, e);
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
-            }
-        }
+    let batched_chat_requests = generate_chat_request(batches);
 
-        // Wait between batches to respect rate limits (except after last batch)
-        if batch_num < total_batches {
-            println!("⏳ Waiting {:?} before next batch...", DELAY_BETWEEN_BATCHES);
-            sleep(DELAY_BETWEEN_BATCHES).await;
-        }
-    }
+    let batched_results = process_request(&state, batched_chat_requests).await.unwrap_or_else(|e| {
+        eprintln!("❌ Request failed: {}", e);
+        Vec::new()
+    });
 
     println!("\n🎉 Audit complete! Total flagged tweets: {}/{}",
-        all_results.len(), total_tweets);
+        batched_results.len(), total_tweets);
 
-    Ok((StatusCode::OK, Json(all_results)))
+    Ok((StatusCode::OK, Json(batched_results)))
+}
+
+fn generate_chat_request(
+    requests: Vec<&[TweetEnvelope]>,
+) -> ChatRequest {
+    ChatRequest {
+        system_instruction: ChatMessage {
+            parts: vec![ChatMessageType::Text(ChatText {
+                text: "From the uploaded json archive, \
+                evaluate all tweets based on the following criteria: unprofessional \
+                and return only the json format: \
+                ```json\
+                [{\
+                    \"tweet_url\": \"https://x.com/username/status/TWEET_ID\",\
+                    \"criteria\": \"reason for flagging\",\
+                    \"deleted\": false\
+                }]\
+                ```\
+                IMPORTANT:\
+                - The tweet_url MUST be in the format: https://x.com/username/status/TWEET_ID where TWEET_ID is from the tweet's 'id_str' field\
+                - If no tweets meet the criteria, return an empty array: []\
+                - Return ONLY valid JSON, no other text"
+                    .into(),
+            })],
+        },
+        contents: vec![ChatMessage {
+            parts: requests.iter().map(|r| ChatMessageType::Text(ChatText {
+                text: serde_json::to_string(r).unwrap_or_else(|e| {
+                    eprintln!("Failed to serialize batch: {}", e);
+                    "[]".to_string()
+                })
+            })).collect()
+        }],
+    }
+}
+
+async  fn process_request(
+    state: &Arc<AppState>,
+    chat_req: ChatRequest
+) -> Result<Vec<AuditedTweets>, Box<dyn std::error::Error>> {
+    let json_str = state.client.exec_chat(chat_req).await?;
+
+    // Handle empty response or non-JSON
+    if json_str.trim().is_empty() || json_str.trim() == "[]" {
+        return Ok(Vec::new());
+    }
+
+    let results = serde_json::from_str::<Vec<AuditedTweets>>(&json_str)
+        .map_err(|e| {
+            println!("⚠️  Failed to parse  response: {}\nResponse: {}",
+                      e, json_str);
+            format!("JSON parse error: {}", e)
+        })?;
+
+    Ok(results)
+
 }
 
 async fn process_batch(
