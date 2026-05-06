@@ -10,7 +10,7 @@ tokio = {
     features = ["full"]
 }
 serde = { version = "1.0.228", features = ["derive"] }
-serde_yaml = "0.9.34+deprecated"
+serde_yaml = "0.9.3"
 csv = "1.4.0"
 serde_json = "1.0.149"
 base64 = "0.22.1"
