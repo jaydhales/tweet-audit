@@ -6,7 +6,9 @@ use tokio::time::sleep;
 pub const GEMINI_MODEL: &str = "gemini-2.5-flash";
 const GEMINI_ENV_KEY: &str = "GEMINI_API_KEY";
 
+use crate::AppError;
 use serde::Deserialize;
+use tracing::{debug, trace};
 
 #[derive(Debug, Deserialize)]
 pub struct ChatResponse {
@@ -140,26 +142,26 @@ pub struct ChatRequest {
 }
 
 impl GeminiClient {
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, AppError> {
         if std::env::var(GEMINI_ENV_KEY).is_err() {
-            panic!("env var not set: {}", GEMINI_ENV_KEY);
+            tracing::error!("env var not set: {}", GEMINI_ENV_KEY);
+            return Err(AppError::Internal(format!(
+                "env var not set: {}",
+                GEMINI_ENV_KEY
+            )));
         }
 
-        println!("🔑 Gemini API Key found in env: {}", GEMINI_ENV_KEY);
-        println!("🚀 Gemini Client initialized with model: {}", GEMINI_MODEL);
-        GeminiClient {
+        tracing::info!("🚀 Gemini Client initialized with model: {}", GEMINI_MODEL);
+        Ok(Self {
             client: reqwest::Client::new(),
             base_url: format!(
                 "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
                 GEMINI_MODEL
             ),
-        }
+        })
     }
 
-    pub async fn exec_chat(
-        &self,
-        request: ChatRequest,
-    ) -> Result<String, Box<dyn std::error::Error>> {
+    pub async fn exec_chat(&self, request: ChatRequest) -> Result<String, AppError> {
         self.exec_chat_with_retry(request, 3).await
     }
 
@@ -167,9 +169,15 @@ impl GeminiClient {
         &self,
         request: ChatRequest,
         max_retries: u32,
-    ) -> Result<String, Box<dyn std::error::Error>> {
+    ) -> Result<String, AppError> {
         let mut headers = HeaderMap::new();
-        headers.insert("x-goog-api-key", std::env::var(GEMINI_ENV_KEY)?.parse()?);
+        headers.insert(
+            "x-goog-api-key",
+            std::env::var(GEMINI_ENV_KEY)
+                .map_err(|e| AppError::ConfigLoad("Env Error".into()))?
+                .parse()
+                .map_err(|e| AppError::ConfigLoad(format!("Invalid Header Value: {}", e)))?,
+        );
 
         let mut attempt = 0;
         let mut wait_time = Duration::from_secs(4);
@@ -177,8 +185,11 @@ impl GeminiClient {
         loop {
             attempt += 1;
 
-            println!("Chat Request (Attempt {}/{}):",
-                attempt, max_retries);
+            debug!(
+                attempt = attempt,
+                max_retries = max_retries,
+                "Sending chat request"
+            );
 
             let response = self
                 .client
@@ -191,22 +202,30 @@ impl GeminiClient {
             let status = response.status();
             let raw_res = response.text().await?;
 
-            println!("Server Response (Status {}):\n{}", status, raw_res);
-
+            trace!(status = %status, "Raw response: {}", raw_res);
 
             // Check for Error
-            if status.as_u16() / 100 >= 4 { // 400 - 504
+            if status.as_u16() / 100 >= 4 {
+                // 400 - 504
                 if attempt >= max_retries {
-                    return Err(format!("Max retries ({}) exceeded. Last error: {}", max_retries, raw_res).into());
+                    return Err(AppError::Internal(
+                        format!(
+                            "Max retries ({}) exceeded. Last error: {}",
+                            max_retries, raw_res
+                        )
+                        .into(),
+                    ));
                 }
 
                 // Try to parse error response to get retry delay
                 if let Ok(err_resp) = serde_json::from_str::<GeminiErrorResponse>(&raw_res) {
-                    println!("⚠️ Gemini Server Error: {}", err_resp.error.message);
+                    tracing::error!("⚠️ Gemini Server Error: {}", err_resp.error.message);
 
                     // Parse retry delay from error message if present
                     // Message format: "Please retry in 59.402129186s."
-                    if let Some(delay_str) = err_resp.error.message
+                    if let Some(delay_str) = err_resp
+                        .error
+                        .message
                         .split("Please retry in ")
                         .nth(1)
                         .and_then(|s| s.split("s.").next())
@@ -217,7 +236,7 @@ impl GeminiClient {
                     }
                 }
 
-                println!("⏳ Waiting {:?} before retry...", wait_time);
+                tracing::info!("⏳ Waiting {:?} before retry...", wait_time);
                 sleep(wait_time).await;
 
                 // Exponential backoff for next attempt
@@ -227,23 +246,23 @@ impl GeminiClient {
 
             // Check for other HTTP errors
             if !status.is_success() {
-                return Err(format!("HTTP error {}: {}", status, raw_res).into());
+                return Err(AppError::Internal(format!("HTTP error {}: {}", status, raw_res).into()));
             }
 
             // Parse successful response
             let res = serde_json::from_str::<ChatResponse>(&raw_res)?;
 
             return if let Some(stripped) = res.first_text_stripped() {
-                println!("Stripped Response: {}", stripped);
+                tracing::info!("Stripped Response: {}", stripped);
                 Ok(stripped)
             } else {
-                Err("Response extraction failed".into())
-            }
+                Err(AppError::Internal("Response extraction failed".into()))
+            };
         }
     }
 }
 
-// pub async fn load_gemini_client() -> Result<GenAIClient, Box<dyn std::error::Error>> {
+// pub async fn load_gemini_client() -> Result<GenAIClient, AppError> {
 //     // Validate env
 //     if std::env::var(GEMINI_ENV_KEY).is_err() {
 //         return Err(format!("env var not set: {}", GEMINI_ENV_KEY).into());

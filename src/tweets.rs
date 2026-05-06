@@ -1,6 +1,7 @@
+use crate::AppError;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 
 /// Entire file deserializes as Vec<TweetEnvelope>
 pub type TweetArchive = Vec<TweetEnvelope>;
@@ -83,8 +84,8 @@ pub struct UserMention {
     pub id: String,
 }
 
-pub fn load_tweets(path: PathBuf) -> Result<TweetArchive, Box<dyn std::error::Error>> {
-    println!("📂 Loading tweets from: {:?}", path);
+pub fn load_tweets(path: PathBuf) -> Result<TweetArchive, AppError> {
+    tracing::info!("📂 Loading tweets from: {:?}", path);
     let raw = fs::read_to_string(path)?;
     let tweets: TweetArchive = serde_json::from_str(&raw)?;
     Ok(tweets)

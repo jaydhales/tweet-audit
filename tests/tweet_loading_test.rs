@@ -1,5 +1,5 @@
-use tweet_audit::tweets::load_tweets;
 use std::path::PathBuf;
+use tweet_audit::tweets::load_tweets;
 
 #[test]
 fn test_load_all_tweets() {
@@ -13,7 +13,7 @@ fn test_load_all_tweets() {
     let tweets = result.unwrap();
 
     // Verify we loaded tweets
-    assert_gt!(tweets.len(), 0, "No tweets loaded from the archive");
+    assert_eq!(tweets.len() > 0, true, "No tweets loaded from the archive");
 
     println!("✅ Successfully loaded {} tweets", tweets.len());
 }
@@ -24,7 +24,8 @@ fn test_initial_variant_tweets() {
     let tweets = load_tweets(path).expect("Failed to load tweets");
 
     // Count tweets with 'initial' variant
-    let initial_count = tweets.iter()
+    let initial_count = tweets
+        .iter()
         .filter(|t| t.tweet.edit_info.initial.is_some())
         .count();
 
@@ -38,13 +39,17 @@ fn test_edit_variant_tweets() {
     let tweets = load_tweets(path).expect("Failed to load tweets");
 
     // Count tweets with 'edit' variant
-    let edit_count = tweets.iter()
+    let edit_count = tweets
+        .iter()
         .filter(|t| t.tweet.edit_info.edit.is_some())
         .count();
 
     println!("📊 Tweets with 'edit' variant: {}", edit_count);
     // At least 2 tweets should have the 'edit' variant based on the error location
-    assert!(edit_count > 0, "Should have at least some tweets with 'edit' variant");
+    assert!(
+        edit_count > 0,
+        "Should have at least some tweets with 'edit' variant"
+    );
 }
 
 #[test]
@@ -77,11 +82,12 @@ fn test_specific_tweet_fields() {
     let first = &tweets[0];
     assert!(!first.tweet.id_str.is_empty(), "Tweet should have an ID");
     assert!(!first.tweet.full_text.is_empty(), "Tweet should have text");
-    assert!(!first.tweet.created_at.is_empty(), "Tweet should have creation date");
+    assert!(
+        !first.tweet.created_at.is_empty(),
+        "Tweet should have creation date"
+    );
 
     println!("✅ First tweet structure validated");
     println!("   ID: {}", first.tweet.id_str);
     println!("   Text: {}", first.tweet.full_text);
 }
-
-
