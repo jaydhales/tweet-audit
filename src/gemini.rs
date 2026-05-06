@@ -82,7 +82,7 @@ impl ChatResponse {
             .map(|p| p.text.as_str())
     }
 
-    /// Returns text with optional markdown code fences removed.
+    /// Returns text with optional Markdown code fences removed.
     /// Handles:
     /// - ```json ... ```
     /// - ``` ... ```
@@ -91,7 +91,7 @@ impl ChatResponse {
     }
 }
 
-/// Utility for stripping markdown code fences from model output.
+/// Utility for stripping Markdown code fences from model output.
 fn strip_code_fence(input: &str) -> String {
     input
         .trim()
@@ -174,7 +174,7 @@ impl GeminiClient {
         headers.insert(
             "x-goog-api-key",
             std::env::var(GEMINI_ENV_KEY)
-                .map_err(|e| AppError::ConfigLoad("Env Error".into()))?
+                .map_err(|| AppError::ConfigLoad("Env Error".into()))?
                 .parse()
                 .map_err(|e| AppError::ConfigLoad(format!("Invalid Header Value: {}", e)))?,
         );
@@ -261,35 +261,3 @@ impl GeminiClient {
         }
     }
 }
-
-// pub async fn load_gemini_client() -> Result<GenAIClient, AppError> {
-//     // Validate env
-//     if std::env::var(GEMINI_ENV_KEY).is_err() {
-//         return Err(format!("env var not set: {}", GEMINI_ENV_KEY).into());
-//     }
-//
-//     let auth_resolver = AuthResolver::from_resolver_fn(
-//         |model_iden: ModelIden| -> Result<Option<AuthData>, genai::resolver::Error> {
-//             let ModelIden {
-//                 adapter_kind,
-//                 model_name,
-//             } = model_iden;
-//
-//             let key = std::env::var(GEMINI_ENV_KEY).map_err(|_| {
-//                 genai::resolver::Error::ApiKeyEnvNotFound {
-//                     env_name: GEMINI_ENV_KEY.to_string(),
-//                 }
-//             })?;
-//
-//             Ok(Some(AuthData::from_single(key)))
-//         },
-//     );
-//
-//     let client = GenAIClient::builder()
-//         .with_auth_resolver(auth_resolver)
-//         .build();
-//
-//     client.resolve_service_target(GEMINI_MODEL).await?;
-//
-//     Ok(client)
-// }
