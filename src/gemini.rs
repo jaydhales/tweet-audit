@@ -174,7 +174,7 @@ impl GeminiClient {
         headers.insert(
             "x-goog-api-key",
             std::env::var(GEMINI_ENV_KEY)
-                .map_err(|| AppError::ConfigLoad("Env Error".into()))?
+                .map_err(|_| AppError::ConfigLoad("Env Error".into()))?
                 .parse()
                 .map_err(|e| AppError::ConfigLoad(format!("Invalid Header Value: {}", e)))?,
         );

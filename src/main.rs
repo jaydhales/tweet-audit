@@ -26,7 +26,7 @@ async fn main() -> Result<(), AppError> {
 
     // Load AI Client
     let client = GeminiClient::new()?;
-
+ 
     let app_state = Arc::new(AppState { client, config });
 
     // build our application with a single route
